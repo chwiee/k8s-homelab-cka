@@ -1,6 +1,4 @@
 #!/bin/bash
-
-# Function to convert CPU requests/limits to millicores if necessary
 convert_cpu_to_millicores() {
     local value=$1
     if [[ $value == *m ]]; then
@@ -10,35 +8,27 @@ convert_cpu_to_millicores() {
     fi
 }
 
-# Get deployments
 deployments=$(kubectl get deployments --all-namespaces -o json)
 
-# Get HPAs
 hpas=$(kubectl get hpa --all-namespaces -o json)
 
-# Prepare CSV header
 echo "Deployment Name,Namespace,CPU Requests,CPU Limits,MEM Requests,MEM Limits,Min HPA,Max HPA,Current Replicas,Max CPU Usage,Max MEM Usage" > deployment_info.csv
 
-# Iterate over deployments
 echo "$deployments" | jq -c '.items[]' | while read -r deployment; do
     name=$(echo "$deployment" | jq -r '.metadata.name')
     namespace=$(echo "$deployment" | jq -r '.metadata.namespace')
 
-    # Get resource requests and limits
     cpu_requests=$(echo "$deployment" | jq -r '.spec.template.spec.containers[]?.resources.requests.cpu // empty' | while read -r cpu; do convert_cpu_to_millicores "$cpu"; done | paste -sd+ - | bc)
     cpu_limits=$(echo "$deployment" | jq -r '.spec.template.spec.containers[]?.resources.limits.cpu // empty' | while read -r cpu; do convert_cpu_to_millicores "$cpu"; done | paste -sd+ - | bc)
     mem_requests=$(echo "$deployment" | jq -r '.spec.template.spec.containers[]?.resources.requests.memory // empty' | paste -sd+ - | bc)
     mem_limits=$(echo "$deployment" | jq -r '.spec.template.spec.containers[]?.resources.limits.memory // empty' | paste -sd+ - | bc)
 
-    # Get HPA min and max replicas
     hpa=$(echo "$hpas" | jq -r --arg name "$name" --arg namespace "$namespace" '.items[] | select(.metadata.namespace == $namespace and .spec.scaleTargetRef.name == $name)')
     min_hpa=$(echo "$hpa" | jq -r '.spec.minReplicas // "N/A"')
     max_hpa=$(echo "$hpa" | jq -r '.spec.maxReplicas // "N/A"')
 
-    # Get current replicas
     current_replicas=$(echo "$deployment" | jq -r '.status.replicas // "N/A"')
 
-    # Find the pod with the maximum CPU and memory usage
     max_cpu_usage=0
     max_mem_usage=0
 
@@ -55,6 +45,5 @@ echo "$deployments" | jq -c '.items[]' | while read -r deployment; do
         fi
     done
 
-    # Write data to CSV
     echo "$name,$namespace,$cpu_requests,$cpu_limits,$mem_requests,$mem_limits,$min_hpa,$max_hpa,$current_replicas,$max_cpu_usage,$max_mem_usage" >> deployment_info.csv
 done
